@@ -1,0 +1,149 @@
+Security
+
+Describe the process of signing an image  
+- You can configure the Docker CLI client to sign the images you push to DTR. This allows whoever pulls your image to validate if they are getting the image you created, or a forged one
+		export DOCKER_CONTENT_TRUST=1
+		docker push <dtr-domain>/<repository>/<image>:<tag>
+
+    - This pushes the image to DTR and creates trust metadata. It also creates public and private key pairs to sign the trust metadata, and pushes that metadata to the Notary Server internal to DTR.
+
+- To sign images in a way that UCP trusts them, you need to
+    - Configure your Notary client
+    - Initialize trust metadata for the repository
+    - Delegate signing of the keys in your UCP client bundle
+
+- Full process
+    - Configure the Notary client
+    - initialize the trust metadata for the new repository, and the easiest way to do it is by pushing an image to that repository
+
+		# Pull NGINX from Docker Store
+		docker pull nginx:latest
+
+		# Re-tag NGINX
+		docker tag nginx:latest dtr.example.org/dev/nginx:1
+
+		# Log into DTR
+		docker login dtr.example.org
+
+		# Sign and push the image to DTR
+		export DOCKER_CONTENT_TRUST=1
+		docker push dtr.example.org/dev/nginx:1
+
+
+    - Delegate trust to the UCP keys
+        - To sign images in a way that is trusted by UCP, you need to delegate trust, so that you can sign images with the private keys in your UCP client bundle.
+			# Delegate trust, and add that public key with the role targets/releases
+			notary delegation add --publish dtr.example.org/dev/nginx targets/releases --all-paths <ucp-cert.pem>
+
+
+Demonstrate that an image passes a security scan 
+
+- Docker Security Scanning is available as an add-on to Docker Trusted Registry, and an administrator configures it for your DTR instance.
+- If you do not see security scan results available on your repositories, your organization may not have purchased the Security Scanning feature or it may be disabled.
+
+- Scans run either on demand when a user clicks the Start a Scan links or Scan button
+    - First a binary scan is run on each layer of the image - A binary scan evaluates the components on a bit-by-bit level
+    - The scan then compares the SHA of each component against the US National Vulnerability Database that is installed on your DTR instance.
+    - DTR scans both Linux and Windows images, but by default Docker doesn’t push foreign image layers for Windows images so DTR can’t scan them.
+
+- By default a scan runs when a push is issued.
+    - no need to run any other commands if DTR is configured this way.
+
+- If automatic scanning is not enabled, you can do a manual scan. You must have write permissions.
+
+- You can enable or disable scanning on individual repositories at any time in the DTR interface
+    - do this while troubleshooting
+
+- From the Images tab in DTR you can click View details for a specific tag to see the full scan results.
+
+- If you find that an image in your registry contains vulnerable components, you can use the linked CVE scan information in each scan report to evaluate the vulnerability and decide what to do. 
+Enable Docker Content Trust 
+- Enable and disable content trust per-shell or per-invocation
+- In a shell, you can enable content trust by setting the DOCKER_CONTENT_TRUST environment variable. 
+
+Configure RBAC in UCP  
+- With Docker Universal Control Plane, you get to control who can create and edit container resources in your swarm, like services, images, networks, and volumes.
+- A grant is made up of a subject, a role, and a resource collection. 
+- A grant defines who (subject) has how much access (role) to a set of resources (collection).If you’re a UCP administrator, you can create grants to control how users and organizations access swarm resources.
+    - A subject represents a user, team, or organization. A subject is granted a role for a collection of resources.
+    - A  role is a set of permitted API operations that you can assign to a specific subject and collection by using a grant. UCP administrators view and manage roles by navigating to the Roles page.s a set of permitted API operations that you can assign to a specific subject and collection by using a grant. UCP administrators view and manage roles by navigating to the Roles page.
+    - Docker EE enables controlling access to swarm resources by using collections. A collection is a grouping of swarm cluster resources that you access by specifying a directory-like path.
+        - Physical or virtual nodes,Containers,Services,etc.
+
+- Grants are effectively ACLs, which grouped together, can provide full and comprehensive access policies for an entire organization. However, before grants can be implemented, collections need to be designed to group resources in a way that makes sense for an organization.
+- 
+
+Integrate UCP with LDAP/AD  
+- Docker UCP integrates with LDAP directory services, so that you can manage users and groups from your organization’s directory and it will automatically propagate that information to UCP and DTR.
+- Select the Just-In-Time User Provisioning option to ensure that the only LDAP accounts that exist in UCP are those that have had a user log in to UCP.
+- You can specify multiple search configurations, and you can specify multiple LDAP servers to integrate with.
+- Hers is what happens when docker UCP is integrated with LDAP
+    - UCP creates a set of search results by iterating over each of the user search configs, in the order that you specify.
+    - UCP chooses an LDAP server from the list of domain servers by considering the Base DN
+    - if no domain server has a domain suffix that matches the base DN from the search config, UCP uses the default domain server
+    - UCP combines the search results into a list of users and creates UCP accounts for them. In JIT account creation the accounts are created when the user logs in.
+- If there is a username config then UCP uses the first search results.
+
+Demonstrate creation of UCP client bundles  
+- A client bundle is a group of certificates downloadable directly from UCP that absorbs all of the associated RBAC.
+    - ex. User may need to log into containers but not see system logs
+    - ex. another user may need to see system logs, but should not be able to log into containers.
+
+- To download a client bundle
+    - log into UCP
+    - navigate to My Profile
+    - in the left pane click client bundle -> new client bundle
+
+- You can also download client bundles by using the UCP REST API.
+    - Then you get an authentication token from UCP, and use it to download the client certificates.
+
+Describe default engine security  
+- push and pull trusted images
+- protect docker deamon socket, and ensure only trusted docker client connections
+- user certificate based client server authentication
+- configure secure compute policies to secure system calls in the container
+- AppArmor profile is installed with the default .deb packages
+
+- Docker Security
+    - intrinsic security of the kernel and its support for namespaces and cgroups
+    - attack surface of the docker deamon
+    - loopholes in the container configuration profile, either by default, or when customized by users.
+
+Describe swarm default security 
+
+- Secure by default - each node in the swarm enforces TLS mutual authentication and encryption to secure communications between all of the nodes
+- When you create a swarm by running docker swarm init, Docker designates itself as a manager node. By default, the manager node generates a new root Certificate Authority (CA) along with a key pair
+    - can designate an external ca using the —external-ca flag
+- The manager also generates separate tokens for workers and managers to join the swarm
+- If the CA token is compromised, yau can rotate the swarm root CA key
+    - docker swarm ca --rotate
+-  
+Describe MTLS  
+Mutual TLS authentication (mTLS) is much more widespread in business-to-business (B2B) applications, where a limited number of programmatic and homogeneous clients are connecting to specific web services, the operational burden is limited and security requirements are usually much higher as compared to consumer environments.
+
+Identity roles  
+- Manage roles through UCP
+    - None - no access to swarm resources
+    - View Only - user can view but not create resources
+    - Restricted control - user can view and edit resources but can not run a container in a way that will effect the operation of the node. User can not run the container in privileged mode or with additional kernel capabilities.
+    - scheduler - The user can view nodes and schedule workloads on them. Worker nodes and manager nodes are affected by Scheduler grants. Having scheduler access doesn’t allow the user to view workloads those nodes.
+    - Full Control - They have control full control of swarm resources
+    - Custom Role - use UCP to build out custom user roles with specific permissions
+
+
+Describe the difference between UCP workers and managers 
+
+- manager - the ucp-agent service starts serving all UCP components, including the UCP web UI and data stores used by UCP. The ucp-agent accomplishes this by deploying several container on the node.
+- worker - ucp-agent service starts serving proxy service that ensures only authorized users and other UCP services can run Docker commands in that node. The ucp-agent deploys a subset of containers on worker nodes.
+
+Describe process to use external certificates with UCP and DTR  
+- UCP
+    - log in to the UCP web UI
+    - go to the admin settings
+    - click on certificates
+
+- DTR
+    - By default the DTR services are exposed using HTTPS
+    - Go to DTR web UI
+    - click on settings
+    - load in the new certificate

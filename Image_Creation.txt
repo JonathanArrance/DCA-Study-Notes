@@ -1,0 +1,410 @@
+Image creation
+
+Describe Dockerfile options [add, copy, volumes, expose, entrypoint, etc)  
+All of these commands are added to the dockerfile to build a new docker image. The docker build command will use the docker file that is in the context.
+
+If you want to build with a Dockerfile outside of context then use the following
+#docker build -f /the/path/to/dockerfile .
+
+Parser directives
+All of the parser directives need to be at the top of the dockerfile. They will be treated as comments if they appear after any of the builder instructions.
+
+Invalid examples:
+
+# direc \
+key=value
+
+Can not use a line continuation backslash
+
+# directive=value1
+# directive=value2
+FROM ImageName
+
+can not state the same parser directive 2 times
+
+FROM ImageName
+# directive=value
+
+treated as a comment because the parser directive appears after builder instruction. 
+
+Directives will also be treated as a comment if they appear after an actual comment
+
+Unknown parser directives will be treated as a comments
+
+Non line breaking whitespace is permitted in a parser directive
+The following lines are treated identically
+
+#directive=value
+# directive =value
+#	directive= value
+# directive = value
+#	  dIrEcTiVe=value
+
+escape 
+
+.dockerignore
+Use the dockerignore in the context of the dockerfile to modify the context and exclude certain files from the docker build process
+
+
+Dockerfile builder instructions
+FROM - pull an existing base image in - a dockerfile must start with a FROM statement.
+- ARG - the only instruction that can precede FROM.  - An ARG declared before FROM is outside of the build so it can not be used with instructions after the FROM. Once an ARG is defined before FROM you can use the value be specifying the ARG with no value
+- FROM can appear multiple time in a dockerfile to create multiple images or to use one build stage as a dependency for another
+- Each FROM instruction clears the state created by previous instructions
+- AS can be used to give the FROM a name 
+    - FROM python27 AS pmaster
+- Can also be used to copy one stage of a build to another 
+    - COPY —from=pmaster
+- 
+
+ex. 
+ARG VERSION=latest
+FROM busybox:$VERSION
+ARG VERSION - this will just use latest
+RUN echo $VERSION > image_version
+
+RUN - will a run a command in the current layer and commit the results to the layer, the resulting committed image will be used for the next step in the dockerfile.
+- shell form - RUN <command>
+- exec form - RUN ["executable", "param1", "param2"]
+- to run as a different shell beside the default /bin/sh
+    - RUN[“/bin/bash”, ”-c”, “echo hello”]
+    - Must use the shell form of a RUN command to do variable substitution
+- The cache from RUN is used in the next layer unless the —no-cache is used with the docker build command
+
+CMD - There can be only one CMD per dockerfile - provides defaults for executing a container
+- exec from - CMD ["executable","param1","param2"]
+- JSON form - CMD ["param1","param2"] - default for ENTRYPOINT
+- shell form - CMD command param1 param2
+- ENTRYPOINT must be specified if only params are specified 
+- If you want to use CMD to run a command with out a shell, you must use the JSON format and specify the full path to the command
+    - ex. FROM ubuntu
+                   CMD ["/usr/bin/wc","--help"]
+
+ADD -  The ADD instruction copies new files, directories, or remote file URLs from the <src> and adds them to the filesystem of the image at the path <dest>
+- Multiple <src> resources may be specified but if they are files or directories, their paths are interpreted as relative to the source of the context of the build.
+- Each <src> may contain wildcards and matching will be done using Go’s filepath.Match rules
+    - ex. ADD hom* /mydir/        # adds all files starting with "hom"
+    - ex. ADD hom?.txt /mydir/    # ? is replaced with any single character, e.g., "home.txt"
+- The <dest> is an absolute path, or a path relative to WORKDIR, into which the source will be copied inside the destination container.
+    - ex. ADD test relativeDir/          # adds "test" to `WORKDIR`/relativeDir/
+    - ex. ADD test /absoluteDir/         # adds "test" to /absoluteDir/
+- when adding paths with special characters you will need to escape the special characters using the Go lang rules
+    - ex. Copy arr[0].txt to mydir - ADD arr[[]0].txt /mydir/
+- All new files and directories are created with a UID and GID of 0, unless the optional --chown flag specifies a given username, groupname, or UID/GID combination to request specific ownership of the content added
+    - NOTE - chown does not work with Windows containers
+    - ex. ADD --chown=55:mygroup files* /somedir/
+    - ex. ADD --chown=bin files* /somedir/
+- In the case where <src> is a remote file URL, the destination will have permissions of 600.
+- If pulling from a URL that needs authentication you must use the RUN instruction
+    - ex RUN curl URL
+- The first encountered ADD instruction will invalidate the cache for all following instructions from the Dockerfile if the contents of <src> have changed. This includes invalidating the cache for RUN instructions.
+- ADD follows certain rules
+    - <SRC> must be within the context. You can not ADD ../myfile /destpath
+    - If <src> is a URL and <dest> does not end with a trailing slash, then a file is downloaded from the URL and copied to <dest>
+    - If <src> is a URL and <dest> does end with a trailing slash, then the filename is inferred from the URL and the file is downloaded to <dest>/<filename>. For instance, ADD http://example.com/foobar / would create the file /foobar.
+    - If <src> is a directory, the entire contents of the directory are copied, including filesystem metadata
+    - If <src> is a local tar archive in a recognized compression format (identity, gzip, bzip2 or xz) then it is unpacked as a directory.
+    - If <src> is any other kind of file, it is copied individually along with its metadata. If the dest ends with a trailing slash dest is treated as a directory
+    - If multiple <src> resources are specified, either directly or due to the use of a wildcard, then <dest> must be a directory, and it must end with a slash /
+    - If <dest> does not end with a trailing slash, it will be considered a regular file and the contents of <src> will be written at <dest>
+    - If <dest> doesn’t exist, it is created along with all missing directories in its path.
+
+COPY - similar to ADD, however it can only copy local files from the host into the image created.
+- 
+
+ENV - the ENV instruction sets the environment variable for the image, it is a key value pair, and it can be used as a value for subsequent instructions
+- ex. ENV <key> <value> - you can set only one key value pair at a time - ENV dog tippy ENV cat yippy
+- ex. ENV <key>=<value> - you can set multiple ENV values - ENV dog=tippy cat=yippy
+- ENV variables persist in the image and persist in the container.
+- you can check the ENV variables set using the docker inspect command docker inspect <imageID>
+
+
+EXPOSE - The EXPOSE instruction specifies which port the container will listen on
+- you can expose either UDP or TCP ports
+- ex EXPOSE 80/udp
+- ex EXPOSE 80/tcp
+- ex. EXPOSE 443/tcp
+-       EXPOSE 443/udp
+- if you use -p flag with docker run the port is exposed once on the tcp or udp port, and can not be exposed again for another container.
+    - ex. docker run -p 80:80/tcp -p 80:80/udp - expose port tcp and udp port in the container to port 80 on the host.
+
+
+LABEL - used to add metadata to an image - a LABEL is a key value pair
+- ex. LABEL "com.example.vendor"="ACME Incorporated"
+- ex. LABEL com.example.label-with-value="foo"
+- ex. LABEL version="1.0"
+- ex. LABEL description="This text illustrates \
+- ex. that label-values can span multiple lines."
+
+ENTRYPOINT - an ENTRYPOINT allows you to run a container configured as an executable.
+- ENTRYPOINT has 2 forms
+    - ENTRYPOINT ["executable", "param1", "param2"] (exec form, preferred)
+    - ENTRYPOINT command param1 param2 (shell form)
+- The shell form prevents any CMD or RUN command line arguments from being used, but has the disadvantage that your ENTRYPOINT will be started as a subcommand of /bin/sh -c, which does not pass signals.
+- -d flag allows you to push arguments directly to the ENTRYPOINT instruction 
+    - ex. docker run <image> -d yabba dabba
+- —entrypoint flag will override the ENTRYPOINT instruction 
+    - ex docker run —entrypoint
+- CMD should come after the ENTRYPOINT when using the exec form, since ENTRYPOINT will override any CMD instructions.
+- You can use the exec form of ENTRYPOINT to set fairly stable default commands and arguments and then use either form of CMD to set additional defaults that are more likely to be changed.
+			FROM ubuntu
+			ENTRYPOINT ["top", "-b"]
+			CMD ["-c"]
+- Unlike the shell form, the exec form does not invoke a command shell. This means that normal shell processing does not happen. For example, ENTRYPOINT [ "echo", "$HOME" ] will not do variable substitution on $HOME
+    - need to use ENTRYPOINT [ "sh", "-c", "echo $HOME" ]
+- Shell form runs all commands in /bin/sh -c
+			FROM ubuntu
+			ENTRYPOINT exec top -b
+- CMD should be used as a way of defining default arguments for an ENTRYPOINT command or for executing an ad-hoc command in a container.
+- CMD will be overridden when running the container with alternative arguments.
+
+STOPSIGNAL
+
+USER - The USER instruction sets the user name (or UID) and optionally the user group (or GID) to use when running the image and for any RUN, CMD and ENTRYPOINT instructions that follow it in the Dockerfile.
+- ex. USER <user>[:<group>]
+- ex. USER <UID>[:<GID>]
+- When the user doesn’t have a primary group then the image (or the next instructions) will be run with the root group.
+- On Windows, the user must be created first if it’s not a built-in account. This can be done with the net user command called as part of a Dockerfile.
+		FROM microsoft/windowsservercore
+    		# Create Windows user in the container
+   		 RUN net user /add patrick
+    		# Set it for subsequent commands
+    		USER patrick
+
+VOLUME - The VOLUME instruction creates a mount point with the specified name and marks it as holding externally mounted volumes from native host or other containers.
+    - ex. VOLUME ["/var/log/“,”/etc/boobidoo”] - JSON array
+    - ex. VOLUME /var/log
+    - ex. VOLUME /var/log /var/db
+- The following will create an image that causes docker run to create a new mount point at /myvol and copy the greeting file into a newly created volume 
+		FROM ubuntu
+		RUN mkdir /myvol
+		RUN echo "hello world" > /myvol/greeting
+		VOLUME /myvol
+- Notes on volumes
+    - Volumes on Windows-based containers: When using Windows-based containers, the destination of a volume inside the container must be one of
+        - ex. a non-existing or empty directory
+        - ex. a drive other than C:
+    - If you change a volume in the dockerfile, all changes will be discarded
+    - JSON arrays must use a double quote
+    - The host directory is declared at container run-time: The host directory (the mountpoint) is, by its nature, host-dependent. This is to preserve image portability, since a given host directory can’t be guaranteed to be available on all hosts.
+
+WORKDIR - The WORKDIR instruction sets the working directory for any RUN, CMD, ENTRYPOINT, COPY and ADD instructions that follow it in the Dockerfile.
+- The WORKDIR instruction can be used multiple times in a Dockerfile.
+- The output of the final pwd command in this Dockerfile would be /a/b/c
+		WORKDIR /a
+		WORKDIR b
+		WORKDIR c
+		RUN pwd
+- The worker can interpret ENV variables 
+
+ONBUILD - The ONBUILD instruction adds to the image a trigger instruction to be executed at a later time, when the image is used as the base for another build. The trigger will be executed in the context of the downstream build, as if it had been inserted immediately after the FROM instruction in the downstream Dockerfile.
+
+ARG - The ARG instruction defines a variable that users can pass at build-time to the builder with the docker build.
+
+Show the main parts of a Dockerfile 
+
+Parser directives - parser directives are optional, and effective the way in which subsequent lines in a dockerfile are handled. Parser directives do not add layers to the build, and will not be shown as a build step.
+
+escape - the escape directive sets the character used to escape characters in a dockerfile. If not specified, the default character is \.
+ 
+Give examples on how to create an efficient image via a Dockerfile 
+
+create ephemeral containers - The image defined by your Dockerfile should generate containers that are as ephemeral as possible. By “ephemeral,” we mean that the container can be stopped and destroyed, then rebuilt and replaced with an absolute minimum set up and configuration.
+
+build context - When you issue a docker build command, the current working directory is called the build context. By default, the Dockerfile is assumed to be located here, but you can specify a different location with the file flag (-f). 
+
+pipe dockerfile through stdin - Docker 17.05 added the ability to build images by piping Dockerfile through stdin with a local or remote build-context
+
+use .dockerignore - To exclude files not relevant to the build (without restructuring your source repository) use a .dockerignore file.
+
+use multistage builds - allow you to drastically reduce the size of your final image, without struggling to reduce the number of intermediate layers and files. Because an image is built during the final stage of the build process, you can minimize image layers by leveraging build cache.
+
+don’t install unnecessary packages - To reduce complexity, dependencies, file sizes, and build times, avoid installing extra or unnecessary packages just because they might be “nice to have.”
+
+decouple applications - Each container should have only one concern. Decoupling applications into multiple containers makes it easier to scale horizontally and reuse containers. - Limiting each container to one process is a good rule of thumb, but it is not a hard and fast rule. - 
+
+minimize the number of layers - in Docker 1.10 and higher, only the instructions RUN, COPY, ADD create layers. Other instructions create temporary intermediate images, and do not directly increase the size of the build. - In Docker 17.05 and higher, you can do multi-stage builds and only copy the artifacts you need into the final image.
+
+sort multiline args - Whenever possible, ease later changes by sorting multi-line arguments alphanumerically. This helps to avoid duplication of packages and make the list much easier to update.
+
+leverage build cache - When building an image, Docker steps through the instructions in your Dockerfile, executing each in the order specified. As each instruction is examined, Docker looks for an existing image in its cache that it can reuse, rather than creating a new (duplicate) image.
+
+
+Use CLI commands such as list, delete, prune, rmi, etc to manage images 
+- docker image ls - list the images in the local registry
+- docker image rm - remove one or more images
+- docker image prune - remove unused images 
+Inspect images and report specific attributes using filter and format 
+- docker image inspect <image> - get detailed information on an image
+- Filtering - docker images —filter label=<key>
+    - Find a dangling image - docker images —filter “dangling=true”
+- Format the output
+    - Format output - docker images —format “{{.ID}}: {{.Repository}}” - only the ID and Repo data will be displayed for the docker images. 
+Demonstrate tagging an image 
+- format - docker tag SOURCE_IMAGE[:TAG] TARGET_IMAGE[:TAG]
+- docker tag 
+- docker image tag  - create a target image that refers to a source image
+    - tag by ID - docker tag 0e5574283393 fedora/httpd:version1.0
+    - tag by name - docker tag httpd fedora/httpd:version1.0
+    - tag image referenced by name and tag - docker tag httpd:test fedora/httpd:version1.0.test
+    - tag image for private repo - docker tag 0e5574283393 myregistryhost:5000/fedora/httpd:version1.0 
+Utilize a registry to store an image 
+- docker image push - push an image to a docker registry
+- forms 
+    - docker image push [OPTIONS] NAME[:TAG]
+    - docker push [OPTIONS] NAME[:TAG]
+- pushing an image
+    - 1. commit the image - docker commit c16378f943fe rhel-httpd
+    - 2. tag the image - docker tag rhel-httpd registry-host:5000/myadmin/rhel-httpd
+    - 3. push to registry - docker push registry-host:5000/myadmin/rhel-httpd 
+Display layers of a Docker image 
+- show the image history - docker image history <image> 
+Apply a file to create a Docker image 
+- form - docker image build [OPTIONS] PATH | URL | -
+- build a new docker image and tag it with a name in the local context
+    - docker image build -t my_new_image . 
+Modify an image to a single layer
+- docker create is different from docker run, since docker create only builds the container on top of the image, however it does not start it.
+    - ex. docker create -t -i fedora bash
+                      docker start -a -i 6d8af538ec5
+
+- form - docker create [OPTIONS] IMAGE [COMMAND] [ARG...]
+- docker export - export a containers filesystem as a tar archive
+    - note this will not export the contents of  mounted file system.
+- docker image import - import the contents from a tarball to create a filesystem image
+    - form - docker image import [OPTIONS] file|URL|- [REPOSITORY[:TAG]]
+    - docker import http://example.com/exampleimage.tgz
+
+- import from local directory - sudo tar -c . | docker import - exampleimagedir
+
+- docker build —squash - squash all newly built layers into a single new layer
+
+Describe how image layers work 
+- Docker containers are built with a series of layers
+- Each layer, except for the very last, is read only
+- Copy On Write is used to write changes into the running layer of the container.
+- Each instruction in a dockerfile will create a new layer, the container layer will be the running/writable layer
+       
+ 	FROM ubuntu:15.04
+       	COPY . /app
+       	RUN make /app
+       	CMD python /app/app.py
+	4 layers created in this example image.  The last layer is the CMD layer and the writable container layer will be added on top.
+
+- The major difference between a container and an image is the top writable layer
+    - All writes to the container that add new or modify existing data are stored in this writable layer.
+    - When the container is deleted, the writable layer is also deleted. The underlying image remains unchanged.
+- view docker container size on disk - docker ps -s
+- 2 containers started from the same underlying image, share 100% of the same read only data
+- copy on write - COW - keeps a container as small as possible since all of the underlying image can be shared between multiple containers, and all of the data writable data is kept as small as possible.
+- Rough COW sequence - For the aufs, overlay, and overlay2
+    - Search through the image layers for the file to update. The process starts at the newest layer and works down to the base layer one layer at a time. When results are found, they are added to a cache to speed future operations.
+    - Perform a copy_up operation on the first copy of the file that is found, to copy the file to the container’s writable lay
+    - Any modifications are made to this copy of the file, and the container cannot see the read-only copy of the file that exists in the lower layer.
+    - Btrfs, ZFS, and other drivers handle the copy-on-write differently. 
+- for write-heavy applications, you should not store the data in the container. Instead, use Docker volumes, which are independent of the running container and are designed to be efficient for I/O. In addition, volumes can be shared among containers and do not increase the size of your container’s writable layer.
+- If Docker had to make an entire copy of the underlying image stack each time it started a new container, container start times and disk space used would be significantly increased.
+
+Deploy a registry (not architect) 
+- The Registry is a stateless, highly scalable server side application that stores and lets you distribute Docker images.
+- Why us a registry
+    - tightly control where your images are being stored
+    - fully own your images distribution pipeline
+    - integrate image storage and distribution tightly into your in-house development workflow
+- example start a registry and push image, pull it, remove registry
+	docker run -d -p 5000:5000 --name registry registry:2
+	docker pull ubuntu
+	docker image tag ubuntu localhost:5000/myfirstimage
+	docker push localhost:5000/myfirstimage
+	docker pull localhost:5000/myfirstimage
+	docker container stop registry && docker container rm -v registry
+ 
+Configure a registry
+- The Registry configuration is based on a YAML file
+- The default registry port is 5000
+- To override default options use environment variables
+    - ex. storage:
+  			filesystem:
+				rootdirectory: /var/lib/registry
+    - env variable - REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY=/somewhere/else
+        - This variable overrides the /var/lib/registry value to the /somewhere/else directory
+
+- If the default configuration is not a sound basis for your usage, or if you are having issues overriding keys from the environment, you can specify an alternate YAML configuration file by mounting it as a volume in the container.
+    - #docker run -d -p 5000:5000 --restart=always --name registry -v `pwd`/config.yml:/etc/docker/registry/config.yml registry:2 
+
+Log into a registry 
+- docker login [OPTIONS] [SERVER] - docker login —username=jon —password=pass 192.168.1.64:5000
+- Using STDIN prevents the password from ending up in the shell’s history, or log-files.
+    - cat ~/my_password.txt | docker login --username foo --password-stdin
+- 
+Utilize search in a registry 
+
+- Search for images in the Docker hub.
+    - # docker search busybox
+- Use no-trunc
+    - # docker search --stars=3 --no-trunc busybox
+- Filter
+    - # docker search --filter is-automated busybox
+- Rest API for private registry
+    - GET /v2/_catalog
+    - GET /v2/_catalog?n=<integer>, pagination
+
+Tag an image  
+- Use the docker tag or -t flag to tag an image
+    - # docker image create -t my-imge-name .
+- Tag an existing image - Create a tag TARGET_IMAGE that refers to SOURCE_IMAGE
+    - # docker image tag SOURCE_IMAGE[:TAG] TARGET_IMAGE[:TAG]
+
+Push an image to a registry  
+- Push an image to a registry 
+    - # docker image push [OPTIONS] NAME[:TAG]
+
+
+Sign an image in a registry  
+- Once DCT(Docker content trust) is enabled, image publishers can sign their images. Image consumers can ensure that the images they use are signed.
+- Consumers “see” only signed image tags and the less desirable, unsigned image tags are “invisible” to them.
+- To create signed content for a specific image tag, simply enable DCT and push a tagged image. If this is the first time you have pushed an image using DCT on your system, you will need to set a password for the signed image
+- When you push your first tagged image with DCT enabled, the docker client recognizes this is your first push and:
+    - alerts you that it is creating a new root key
+    - requests a passphrase for the root key
+    - generates a root key in the ~/.docker/trust directory
+    - requests a passphrase for the repository key
+    - generates a repository key in the ~/.docker/trust directory
+	The passphrase you chose for both the root key and your repository key-pair should be randomly generated and stored in a password manager.
+
+Pull an image from a registry  
+- Pull an image from a registry 
+    - # docker pull [OPTIONS] NAME[:TAG|@DIGEST]
+
+- If you are behind an HTTP proxy server, for example in corporate settings, before open a connect to registry, you may need to configure the Docker daemon’s proxy settings, using the HTTP_PROXY, HTTPS_PROXY, and NO_PROXY environment variables. 
+
+- Pull a specific version
+    - # docker pull debian:jessie
+
+- To pull from a different registry
+    - Login if need be
+        - # docker login server:5000
+    - # docker pull myregistry.local:5000/testing/test-image
+
+Describe how image deletion works  
+- Delete all of the containers not running
+    - # docker rm $(docker ps -a -q)
+
+- Delete all of the untagged images 
+    - # docker rmi $(docker images -f "dangling=true" -q)
+
+- 
+Delete an image from a registry  
+- You can delete an image from the Docker Hub by deleting individual tags in your repository in the tags area.
+- To delete an image, go to the DTR web UI, and navigate to the image repository you want to delete. In the Tags tab, select all the image tags you want to delete
+    - You can also delete all image versions, by deleting the repository.
+- An image may be deleted from the registry via its name and reference. A delete may be issued with the following request format For deletes, reference must be a digest or the delete will fail.
+    - DELETE /v2/<name>/manifests/<reference>
+
+Health checks
+DTR also exposes several endpoints you can use to assess if a DTR replica is healthy or not:
+* /health: Checks if the several components of a DTR replica are healthy, and returns a simple json response. This is useful for load balancing or other automated health check tasks.
+* /nginx_status: Returns the number of connections being handled by the NGINX front-end used by DTR.
+* /api/v0/meta/cluster_status: Returns extensive information about all DTR replicas.
+
+Deploy a service on a Docker overlay network 

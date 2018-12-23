@@ -1,0 +1,301 @@
+Install and Config
+------------------
+
+===Demonstrate the ability to upgrade the Docker engine 
+- refer to the docs
+
+===Complete setup of repo, select a storage driver, and complete installation of Docker engine on multiple platforms  - refer to the docs
+
+===Configure logging drivers (splunk, journald, etc)  
+- Configure the log drive in daemon.json which is located in /etc/docker.
+    - C:\ProgramData\docker\config on WIndows
+- Default logging drive is JSON-file
+    - ex. Set to Syslog
+        - { “log-drive”: “syslog” }
+
+- Set logging option with the log-opts key
+
+	{
+  	"log-driver": "json-file",
+  	"log-opts": {
+    		"labels": "production_status",
+    		"env": "os,customer"
+ 	 	}
+	}
+
+- to find the logging driver in use
+    - # docker info | grep ‘Logging Driver’
+
+- containers can use different logging drivers than what is in daemon.json
+    - use the —log-driver option when starting the container
+        - ex. # docker run -it —log-driver syslog alpine ash
+            - run alpine container with the syslog logging driver.
+    - Find out which driver a container is useing
+        - # docker inspect -f '{{.HostConfig.LogConfig.Type}}' <CONTAINER>
+
+- Configure the log delivery mode
+    - direct blocking from container to driver - default mode
+    - non-blocking delivery that stores log messages in an intermediate per-container ring buffer for consumption by the driver
+        - prevents apps from blocking message delivery due to logging back pressure. Apps can fail in unexpected ways when STDERR and STDOUT streams block
+    - When the buffer is full and a new message is qued the oldest message is deleted
+
+- —log-opt mode=<blocking | non-blocking> controls what mode to use
+    - ex. # docker run -it --log-opt mode=non-blocking --log-opt max-buffer-size=4m alpine ping 127.0.0.1
+
+- use an environment variable in the logging driver
+    - ex. starts a container using the Docker daemon’s default logging driver but sets the env variable os=ubuntu
+        - # docker run -dit --label production_status=testing -e os=ubuntu alpine sh
+			"attrs":{"production_status":"testing","os":"ubuntu"}
+
+
+Setup swarm, configure managers, add nodes, and setup backup schedule  
+- docker swarm init —advertise-addr 192.168.1.10
+- docker node ls - see the nodes in a swarm
+- docker swarm join —token jdakjdaskldjasdkj 192.168.1.10:2377 - join worker to the swarm - master needs master token
+- docker swarm join-token manager - create a swarm master node join token
+- goto /var/lib/docker/swarm - backup your swarm configs
+    - backup the entire directory
+- Restore the backup
+    - shut down docker on target host
+    - remove contents of /var/lib/docker/swarm
+    - copy the contents of the backup into a new /var/lib/docker/swarm
+    - run docker swarm init —force-new-cluster
+    - run docker service ls to make sure services are in exepected state
+    - docker swarm unlock-key —rotate
+
+Create and manager user and teams  
+- Use UCP to create a new user
+    - Can integrate with LDAP
+    - with built in auth you need to grant admins privilege if needed
+    - all users created with a default set of permissions used to access the swarm
+- Create a new user in the Users section of the UCP
+    - to make an admin check the Is UCP admin box
+
+- to increase permissions or add granularity add user to a team.
+    - In UCP go to Organizations to create a new team
+
+Interpret errors to troubleshoot installation issues without assistance  
+- manually start docker
+    - # dockerd
+
+- configure docker
+    - /ect/docker/daemon.json
+    - set to debug mode
+	{
+  	"debug": true,
+  	"tls": true,
+  	"tlscert": "/var/docker/server.pem",
+  	"tlskey": "/var/docker/serverkey.pem",
+  	"hosts": ["tcp://192.168.59.3:2376"]
+	}
+
+- you can also start debug with dockerd 
+    - dockerd —debug —tls=true —tlscert=blah 
+
+- to change from /var/lib/docker or C:\ProgramData\docker use the data-root config option in daemon.json
+- Use debug option to learn about docker run time activity and to aide in finding issues
+- To troubleshoot conflicts between daemon.json and startup script
+- Force a stack trace log
+    - sudo kill -SIGUSR1 $(pidof dockerd)
+- View stacks
+    - journalctl -u docker.service
+    - Windows - Get-EventLog -LogName Application -Source Docker -After (Get-Date).AddMinutes(-5) | Sort-Object Time | Export-CSV
+
+- check status
+    - sudo systemctl status docker
+
+
+Outline the sizing requirements prior to installation  
+- minimum config - testing 
+* 8GB of RAM for manager nodes or nodes running DTR
+* 4GB of RAM for worker nodes
+* 3GB of free disk space
+
+- production config 
+* 16GB of RAM for manager nodes or nodes running DTR
+* 4 vCPUs for manager nodes or nodes running DTR
+* 25-100GB of free disk space
+
+- Windows container images are typically larger than Linux ones and for that reason, you should consider provisioning more local storage for Windows nodes and for DTR setups that will store Windows container images.
+- For overlay networks with encryption to work, you need to ensure that IP protocol 50 (ESP) traffic is allowed.
+- make sure to allow UCO enough time to synchronize
+- should use an NTP server to sync time between all nodes in the cluster under UCP control
+
+DTR Requirements
+- 4GB Ram
+- Disk - DTR app - 1.8 GB minimum should have around 20-30GB for plenty of breathing room and other apps to exist
+- Dick - storage - Dependent on the environment it lives in - storage scales linearly with the amount of images and IO
+- CPU Any modern CPU
+
+UCP Requierments
+- Same as engine and DTR
+
+- Design best practices
+    - https://success.docker.com/article/docker-ee-best-practices-17-03
+
+Understand namespaces, cgroups, and configuration of certificates  
+- namespaces - Each aspect of a container runs in a separate namespace and its access is limited to that namespace.
+    - Docker Engine uses namespaces such as the following on Linux:
+        * The pid namespace: Process isolation (PID: Process ID).
+        * The net namespace: Managing network interfaces (NET: Networking).
+        * The ipc namespace: Managing access to IPC resources (IPC: InterProcess Communication).
+        * The mnt namespace: Managing filesystem mount points (MNT: Mount).
+        * The uts namespace: Isolating kernel and version identifiers. (UTS: Unix Timesharing System).
+
+- cgroups
+    - limit the app to a specific set of resources - limit resources consumed by a specific container
+
+- docker daemon socket - By default, Docker runs via a non-networked Unix socket. It can also optionally communicate using an HTTP socket.
+
+- Certificates
+    - generate a CA cert 
+        - openssl genrsa -aes256 -out ca-key.pem 4096
+        - openssl req -new -x509 -days 365 -key ca-key.pem -sha256 -out ca.pem
+
+    - Create the server key and signing request
+        - openssl genrsa -out server-key.pem 4096
+        - openssl req -subj "/CN=$HOST" -sha256 -new -key server-key.pem -out server.csr
+
+    - Sign the public key with CA
+        - echo subjectAltName = DNS:$HOST,IP:10.10.10.20,IP:127.0.0.1 >> extfile.cnf
+        - echo extendedKeyUsage = serverAuth >> extfile.cnf
+        - openssl x509 -req -days 365 -sha256 -in server.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out server-cert.pem -extfile extfile.cnf
+
+
+Use certificate-based client-server authentication to ensure a Docker daemon has the rights to access images on a registry  
+- A custom certificate is configured by creating a directory under /etc/docker/certs.d using the same name as the registry’s hostname
+- 
+
+
+Consistently repeat steps to deploy Docker engine, UCP, and DTR on AWS and on premises in an HA config
+
+- Docker Trusted Registry (DTR) is a containerized application that runs on a swarm managed by the Universal Control Plane (UCP). It can be installed on-premises or on a cloud infrastructure.
+- DTR requirements
+    - 16GB of RAM for nodes running DTR / 4 vCPUs for nodes running DTR / 25-100GB of free disk space
+    - Port 80/tcp and port 443/tcp - web app access for DTR
+- Since DTR requires Universal Control plane, UCP should be installed first.
+    - DTR needs to be installed on a worker node that is being managed by UCP. 
+    - You cannot install DTR on a standalone Docker Engine.
+- Install DTR - $ docker pull docker/dtr:2.6.0
+            -  $ docker run -it --rm docker/dtr:2.6.0 install --ucp-node <ucp-node-name> --ucp-insecure-tls
+- By default DTR is deployed with self-signed certificates, so your UCP deployment might not be able to pull images from DTR. Use the --dtr-external-url <dtr-domain>:<port> optional flag while deploying DTR, so that UCP is automatically reconfigured to trust DTR.
+- To set up DTR for high availability, you can add more replicas to your DTR cluster. Adding more replicas allows you to load-balance requests across all replicas, and keep DTR working if a replica fails.
+    - Use odd number of nodes to replicate - 3, 5, 7, etc. - nodes must be managed by UCP
+- Add nodes to the DTR cluster
+    - docker/dtr join
+    - When you join a replica to a DTR cluster, you need to specify the ID of a replica that is already part of the cluster. - Go to Application page in UCP to find the replica ID
+    - # docker run -it --rm docker/dtr:2.6.0 join --ucp-node <ucp-node-name> --ucp-insecure-tls
+
+
+- Universal Control Plane - (UCP) is a containerized application that you can install on-premise or on a cloud infrastructure.
+- UCP requirements
+    - The same as the docker trusted registry
+    - UCP is a containerized application that requires the commercially supported Docker Engine to run. - Same version on all nodes.
+- Docker UCP uses named volumes to persist data. If you want to customize the drivers used to manage these volumes, you can create the volumes before installing UCP.
+    - Install UCP: # docker image pull docker/ucp:2.2.14
+    -                       # docker container run --rm -it --name ucp -v /var/run/docker.sock:/var/run/docker.sock docker/ucp:2.2.14 install --host-address <node-ip-address> --interactive
+- Will need to get the Docker EE subscription to license your UCP instance.
+- HA UCP - Add swarm manager nodes. - In the UCP web UI click on ADD Nodes -> click add node as manager -> node will become swarm manager and UCP will replicate to it.
+- You can use the https://<ucp-manager-url>/_ping endpoint to check the health of a single UCP manager node.
+    - docker node ls - command line to check status
+
+
+- AWS - There are two ways to deploy Docker for AWS
+    - Use an existing VPC
+    - new VPC created by Docker
+- create a new VPC
+    - run docker for AWS and build out the networks and gateways using the cloud formation template
+- Existing VPC
+    - Pick a VPC region
+    - make sure the vac is set up with gateway, subnets and tables
+    - 3 different subnets in their own AZ, should have 3 AZ’s.
+    - when cloud formation template used make sure to select the one of your existing VPCs
+- Pre-reqs
+    - Access to an AWS account with permissions to use CloudFormation and creating the following objects.
+        * EC2 instances + Auto Scaling groups
+        * IAM profiles
+        * DynamoDB Tables
+        * SQS Queue
+        * VPC + subnets and security groups
+        * ELB
+        * CloudWatch Log Group
+    - ssh keys in AWS
+    - AWS account that supports EC2-VPC
+- AWS Config
+    - Can deploy with the AWS Web Console or the AWS CLI
+    - Use cloud formation templates to deploy SWARM on customized AWS AMI images
+    - aws cloudformation create-stack --stack-name teststack --template-url <templateurl> --parameters ParameterKey=<keyname>,ParameterValue=<keyvalue> ParameterKey=InstanceType,ParameterValue=t2.micro ParameterKey=ManagerInstanceType,ParameterValue=t2.micro ParameterKey=ClusterSize,ParameterValue=1 .... --capabilities CAPABILITY_IAM
+
+
+Complete configuration of backups for UCP and DTR 
+- Backup steps order
+    - Backup Swarm
+    - Backup UCP
+    - Backup DTR
+
+- Backup Policy
+    - Regular backups of UCP with DTR backed up separately
+    - backup UCP - #docker/ucp:2.2.14 backup
+        - create a tar archive with the contents of all the volumes used by UCP to persist data and streams to STDOUT
+        - UCP backup does not include swam-mode state - like service definitions and overlay network definitions
+    - To create a consistent backup, the backup command temporarily stops the UCP containers running on the node where the backup is being performed. 
+        - Run backup command only on one UCP node
+        - to minimize impact you should run UCP in HA mode
+- 
+- Create, encrypt, and verify a backup of UCP
+#docker container run --log-driver none --rm --interactive --name ucp -v /var/run/docker.sock:/var/run/docker.sock \
+docker/ucp:2.2.14 backup --id <ucp-instance-id> --passphrase "secret" > /tmp/backup.tar 
+Decrypt
+gpg —decrypt /tmp/backup.tar | tar —list
+
+- Restore UCP
+    - To restore an existing UCP installation from a backup, you need to uninstall UCP from the swarm by using the uninstall-ucp command.
+    - Use the same version of UCP to recover
+    - # docker container run —rm -i —name ucp -v /var/run/docker.sock:/var/run/docker.sock docker/ucp:2.2.14 restore —passphrase “secret” < /tmp.backup.tar
+    - UCP restore does not include SWARM assets
+        - On a manager node of an existing swarm which does not have UCP installed. In this case, UCP restore will use the existing swarm.
+        - On a docker engine that isn’t participating in a swarm. In this case, a new swarm is created and UCP is restored on top.
+
+- Backup SWARM
+    - SWARM config strode in /var/lib/docker/swarm
+        - if auto lock enabled must have keys to unlock before you can restore from backup
+        - stop docker on the manager before backing up so no changes occur
+        - always make sure to maintain quorum during swarm node backups
+        - backup up the entire /var/lib/docker/swarm directory
+        - restart the manager
+
+- Restore the SWARM
+    - Shut down docker on the target host machine
+    - remove the contents of /var/lib/docker/swarm
+    - restore /var/lib/docker/swarm 
+    - strat docker on the node, unlock if necessary, re-init the swarm
+        - docker swarm init —force-new-cluster
+        - if auto lock used - rotate the key
+    - add manager and worker nodes to bring your new swarm up to operating capacity
+    - re-instate the previous backup regime.
+
+- Backup DTR
+    - DTR requires that a majority (n/2 + 1) of its replicas are healthy at all times for it to work.
+    - to backup the DTR run #docker/dtr backup
+    - Backup DTR data
+        - Backup image content - local or NFS
+            - tar -cf backup-images.tar $(dirname $(docker volume inspect --format '{{.Mountpoint}}' dtr-registry-<replica-id>))
+        - Backup the metadata
+            - read -sp 'ucp password: ' UCP_PASSWORD;
+            - docker run --log-driver none -i --rm --env UCP_PASSWORD=$UCP_PASSWORD docker/dtr:2.3.9 backup --ucp-url <ucp-url>  --ucp-insecure-tls --ucp-username <ucp-username> --existing-replica-id <replica-id> > backup-metadata.tar
+
+- Restore DTR
+    - stop any of the DTR containers that are running
+    - restore the images from the backup
+    - restore the DTR metadata
+    - re-fetch the vulnerability database
+
+Configure the Docker daemon to start on boot  
+- systemd
+    - sudo systemctl enable docker
+
+- upstart - automatically added to upstart
+    - echo manual | sudo tee /etc/init/docker.override
+
+- chkconfig
+    - sudo chkconfig docker on

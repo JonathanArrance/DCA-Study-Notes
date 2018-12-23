@@ -1,0 +1,228 @@
+Orchestration
+
+Complete​ ​the​ ​setup​ ​of​ ​a​ ​swarm​ ​mode​ ​cluster,​ ​with​ ​managers​ ​and​ ​worker​ ​nodes
+Manager Node
+1. SSH to the desired manager node
+2. #docker swarm init —advertise-addr “the ip”
+
+NOTE: if using docker for Mac or windows you do not need to use the advertise address for a single node setup. docker swarm init “the ip”
+
+3. The docker swarm node connect token will be displayed
+4. Docker swarm will communicate on port 2377
+5. #docker swarm join —token “the token” “the ip”:2377 to join a new swarm node
+6. #docker swarm join-token manager, will generate a new token to add a swarm manager
+7. #docker node ls to list the docker nodes in the swarm cluster
+
+State​ ​the​ ​differences​ ​between​ ​running​ ​a​ ​container​ ​vs​ ​running​ ​a​ ​service
+
+Container
+- A container is the running instance of an image that may or may not have new layers with changes added on top in a new layer.
+- Container is an isolated process
+- Containers run in their own namespace
+- 
+- The major difference between a container and an image is the top writable layer. All writes to the container that add new or modify existing data are stored in this writable layer. When the container is deleted, the writable layer is also deleted. The underlying image remains unchanged.
+- When a container is deleted, any data written to the container that is not stored in a data volume is deleted along with a container.
+
+Service
+- A service is a container or set of containers running in a swarm cluster composed of tasks
+- A service is the image for a micro service within the context of a larger application.
+- When you create a service, you define its optimal state (number of replicas, network and storage resources available to it, ports the service exposes to the outside world, and more). Docker works to maintain that desired state. For instance, if a worker node becomes unavailable, Docker schedules that node’s tasks on other nodes. A task is a running container which is part of a swarm service and managed by a swarm manager, as opposed to a standalone container.
+
+Demonstrate​ ​steps​ ​to​ ​lock​ ​a​ ​swarm​ ​cluster
+
+# docker swarm init —autolock
+You will need to unlock the swarm when docker restarts or you will get an error.
+
+To update an existing swarm 
+#docker swarm update —autolock=true
+
+To disable autolock
+#docker swarm update —autolock=false
+
+To unlock a swarm
+#docker swarm unlock
+
+To show the unlock key
+#docker swarm unlock-key
+
+To rotate the key
+#docker swarm unlock-key —rotate
+
+Extend​ ​the​ ​instructions​ ​to​ ​run​ ​individual​ ​containers​ ​into​ ​running​ ​services​ ​under​ ​swarm
+- You can run a container as service in a swarm by running the following command
+- #docker service create —replicas 1 —name yabbadabba alpine nslookup google.com
+- Run #docker service ls to see the new running service
+    - Name yabbadabba
+    - Replicas 1
+    - Runs alpine Linux base container
+    - Running command nslookup google.com
+
+Interpret​ ​the​ ​output​ ​of​ ​"docker​ ​inspect"​ ​commands
+#docker service inspect —pretty “service_id”
+If the pretty flag is left off then the output is given in JSON format.
+
+#docker service ps - get the list of running services in swarm
+
+Convert​ ​an​ ​application​ ​deployment​ ​into​ ​a​ ​stack​ ​file​ ​using​ ​a​ ​YAML​ ​compose​ ​file​ ​with "docker​ ​stack​ ​deploy"
+
+Use a YAML file to define a service in swarm - docker stack deploy works with compose file version 3.0 or above
+#docker stack deploy —compose-file docker-compose.yaml abbadoo
+
+- Compose file parts
+	Context - path to the docker file or the url that points to it.
+	Dockerfile - specify an alternate docker file
+        Args - build arguments, which are environment variables accessible during the build process
+
+Manipulate​ ​a​ ​running​ ​stack​ ​of​ ​services
+
+#docker stack deploy - deploy a new stack into swarm or update an existing stack
+#docker stack ls - list the running stacks
+#docker stack ps - list all of the tasks in the stack
+#docker stack rm - remove a stack
+#docker stack services - list the services in a stack
+
+Related docker service commands
+#docker service create —name redis —replicas=5 redis:3.0.6
+
+Use a private registry
+#docker login registry.example.com
+#docker service create —with-registry-auth —name my_service registry.example.com/acme/my_image:latest
+
+Increase​ ​#​ ​of​ ​replicas
+
+#docker service scale frontend=50
+- scale the frontend service to 50 tasks
+- you can only scale a service in replicated mode
+
+#docker service scale frontend=10 backend=10
+- use this command to scale multiple services at the same time
+
+#docker service update --replicas=50 frontend
+- use the docker update command to scale the number of tasks in a service
+- 
+
+Add​ ​networks,​ ​publish​ ​ports
+Routing mesh - When you publish a service port, the swarm makes the service accessible at the target port on every node regardless of whether there is a task for the service running on the node or not. - easy
+
+publish service task port directly on node - available in docker 1.3 or newer - bypasses the routing mesh and provides the maximum flexibility, including the ability for you to develop your own routing framework. You are responsible for keeping tasks running and routing requests to the tasks.
+
+Deploy 3 nginx tasks across the nodes in a cluster - use the routing mesh
+#docker service create --name my_web --replicas 3 --publish published=8080,target=80 nginx
+
+Deploy the 3 nginx tasks across the nodes in a cluster - directly map the port to the node - need to use mode=host
+#docker service create --mode global —publish mode=host,target=80,publish=8080 —name=nginx nginx:latest
+
+If you use this method you will not be able to bind another service to port 8080, if a new node is added to the swarm then a new task will fire up on that node since the global option is specified.
+
+The service mode determines whether this is a replicated service or a global service. A replicated service runs as many tasks as specified, while a global service runs on each active node in the swarm
+
+create a new overlay network
+# docker network create —driver overlay my-new-net
+If a new overlay network is created in swarm mode all managers can reach it
+
+to use the new overlay network in your service 
+# docker service create —name my_web2 —replicas 3 —network my-new-net nginx
+once the service deploys the overlay network is deployed to each node that runs the service
+
+you can also attach an existing service to the new overlay network
+# docker service update —network-add my-new-net my_web
+
+Volumes
+
+local is the default driver, you do not need to specify a driver if you plan on using local
+
+Create
+Create a local driver volume
+#docker volume create --driver local webservice
+
+Delete
+Delete the volume
+#docker volume rm webservices
+
+Mount​ ​volumes
+
+Volume Mounts
+For best performance and portability always write container data to an external volume and not to the writable layer in the container.
+Like containers volumes in a swarm outlive a service or task so they must be managed separately.
+If you specify a volume when the service is created and one is not present then one will be created.
+The default vol drive is type local
+# docker service create --mount src=<HOST-PATH>,dst=<CONTAINER-PATH> —name myserivce <IMAGE>
+
+
+Bind mounts
+Bind mounts are file system paths from the host where the scheduler deploys the container for the task. Docker mounts the path into the container. The file system path must exist before the swarm initializes the container for the task.
+- mount the bind volume read/write
+	#docker service create --mount type=bind,src=<HOST-PATH>,dst=<CONTAINER-PATH> --name myservice <IMAGE>
+- mount the bind volume readonly
+        #docker service create --mount type=bind,src=<HOST-PATH>,dst=<CONTAINER-PATH>,readonly --name myservice <IMAGE>
+
+If the path does not exist on the node it is scheduled on the task may not operate properly
+If you use bind mounts the service may not be portable
+
+Illustrate​ ​running​ ​a​ ​replicated​ ​vs​ ​global​ ​service
+A global service runs on every node in the cluster
+Ex - monitoring system you want to run by default on all of the nodes
+
+A replicated service runs a specified number of replicas in the cluster.
+Ex - web server or other app
+
+Identify​ ​the​ ​steps​ ​needed​ ​to​ ​troubleshoot​ ​a​ ​service​ ​not​ ​deploying
+Services in the swarm may not come up or stay in the pending state due to resources not being available in the cluster.
+- check system memory on nodes
+- Check storage on nodes
+- Check cpu availability
+
+Apply​ ​node​ ​labels​ ​to​ ​demonstrate​ ​placement​ ​of​ ​tasks
+You can use node labels to add metadata to a node
+
+Add a standard label
+#docker node update —label-add node03 picluster03-office
+
+In order to add multiple labels
+#docker node update —label-add node03 —label-add abbadoo picluster03-office
+
+If you do not add a value, the label is added with no value to the metadata
+If you want to add a key value pair 
+#docker node update —label-add type=queue picluster03-office
+
+Node labels can be used as a constraint when deploying a service in the cluster
+#docker service create --name my_web --replicas 3 --publish published=8080,target=80 —constraint ‘node.label.type == queue’ nginx
+
+Sketch​ ​how​ ​a​ ​Dockerized​ ​application​ ​communicates​ ​with​ ​legacy​ ​systems
+
+A dockerized application communicates with legacy apps by mapping a port from the containerized app to the outside world
+
+Use the -p or —publish flag to map the port <hostport>:<containerport>
+
+-p 8080:80/udp map udp port 80 in the container to port 8080 on the host
+-p 8080:80/tcp -p 8080:80/tcp map udp port 80 and tcp port 80 to port 8080 on the docker host
+
+Paraphrase​ ​the​ ​importance​ ​of​ ​quorum​ ​in​ ​a​ ​swarm​ ​cluster
+- swarm maintains a quorum of managers if the managers fall out of quorum then manager tasks can not be performed
+- to maintain a quorum you should have more than 2 masters in the swarm cluster
+- should maintain an odd number of managers
+    - if you have 3 or 4 managers you can only loose 1 manager to maintain quorum
+    - if you have 5 or 6 managers you can loose 2 and maintain quorum
+- if you want to make a manager node do only manager tasks, and not act as a worker.
+    - #docker node update —availability drain manager01-office
+    - all nodes act as workers by default even if they are set as managers
+- if the cluster is out of quorum you can not add new nodes to the cluster
+- swarm can not automatically recover quorum if it is lost.
+    - tasks on the workers continue to run
+    - admin tasks can not be done
+- In order to get quorum after it is lost
+    - try to recover the manager node - best thing to try
+
+quorum equation
+(N-1)/2 where N is the number of master nodes
+
+(5-1)/2 = 2, you can loose 2 nodes and still maintain the quorum in the cluster
+
+if the downed master node can not be brought back online, and quorum can not be re-established
+#docker swarm init —force-new-cluster —advertise-addr 192.168.1.61:2377
+
+
+Demonstrate​ ​the​ ​usage​ ​of​ ​templates​ ​with​ ​"docker​ ​service​ ​create"
+
+docker stack create —compose-file . yo.yml abbadoo
+

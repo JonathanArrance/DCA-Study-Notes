@@ -1,0 +1,147 @@
+Networking
+
+Create a Docker bridge network for a developer to use for their containers 
+
+- By default, Docker Engine connects container via a default bridge to the network of the node. However, only overlay networks in a Swarm context let containers communicate further than the nodes network boundaries. In special cases, own bridge networks can be added to i.e. allow for communication only between two special containers.
+
+- Create a new bridge network
+    - # docker network create my-new-net
+    - # docker network rm my-new-net
+
+- Differences between default bridge and user-defined bridge
+    - User-defined bridges provide better isolation and interoperability between containerized applications
+    - User-defined bridges provide automatic DNS resolution between containers.
+    - Containers can be attached and detached from user-defined networks on the fly.
+    - Each user-defined network creates a configurable bridge.
+    - Linked containers on the default bridge network share environment variables.
+
+- Connect a container to a user defined bridge network
+    - # docker create --name my-nginx —network my-new-net —publish 8080:80 nginx:latest
+
+- Connect running container to user defined bridge
+    - # docker network connect my-new-net my-runing-container
+    - # docker network disconnect my-new-net my-running-container
+
+- enable forwarding to the outside world 
+    - On docker host configure the Kernel
+        - sysctl net.ipv4.conf.all.forwarding=1
+        - sudo iptables -P FORWARD ACCEPT
+
+- The default bridge should not be used for production workloads
+    - To configure the default bridge use /etc/docker/daemon.json
+
+Troubleshoot container and engine logs to understand a connectivity issue between containers  
+- To troubleshoot problems with container communication, you can use docker network inspect of the different containers to see, whether those containers are connected through the same network. 
+- Also, it is important if you're running a Docker Swarm: If so, your containers need to be bound together by an Overlay network if they're run on different nodes in the swarm. 
+- Bridge networks aren't able to communicate over node boundaries.
+
+- look at docker network config 
+    - # docker network inspect my-new-net
+
+Publish a port so that an application is accessible externally
+
+- you can use EXPOSE during the docker build process and then use docker run use the parameter -P to publish all exposed ports of said Image to the external IP of the node. 
+- You are also free to expose ports manually via -p, i.e. -p="8080:80" to expose the port 80 of the container to the port 8080 of the host. 
+- Without giving an external port, like -p="80" you'll export the port 80 of the container to an random port. 
+- You can also lock the port export to a specified interface of the host, i.e. with -p="192.168.2.6:8080:80". 
+- It is also possible to randomize the external port in that scenario: -p="192.168.2.6::80".
+
+- With the exception of the EXPOSE directive, an image developer hasn’t got much control over networking. The EXPOSE instruction defines the initial incoming ports that provide services.
+ 
+Identify which IP and port a container is externally accessible on 
+
+- you can look up every port which is exposed by using docker inspect CONTAINER on every container. 
+- to just get the port binding information, you could use docker port CONTAINER. 
+- To make this more useable, you can also script this like docker port `docker ps -q` to get the export of all bound ports of all running containers. The official way would be to use just docker ps.
+
+
+ Describe the different types and use cases for the built-in network drivers  
+- Bridge - The bridge driver creates a private network internal to the host so containers on this network can communicate. External access is granted by exposing ports to containers. Docker secures the network by managing rules that block connectivity between different Docker networks.
+
+- Overlay - The built-in Docker overlay network driver radically simplifies many of the complexities in multi-host networking. It is a swarm scope driver, which means that it operates across an entire Swarm or UCP cluster rather than individual hosts. With the overlay driver, multi-host networks are first-class citizens inside Docker without external provisioning or components.
+    - Uses VXLAN
+
+- Macvlan- Containers are addressed with routable IP addresses that are on the subnet of the external network.  This can aid in network visibility and troubleshooting. Additionally, the direct traffic path between containers and the host interface helps reduce latency. macvlan is a local scope network driver which is configured per-host. As a result, there are stricter dependencies between MACVLAN and external networks, which is both a constraint and an advantage that is different from overlay or bridge.
+
+- The Docker networking architecture is built on a set of interfaces called the Container Networking Model (CNM). The philosophy of CNM is to provide application portability across diverse infrastructures.
+
+
+Understand the Container Network Model and how it interfaces with the Docker engine and network and IPAM drivers 
+
+- The Docker networking architecture is built on a set of interfaces called the Container Networking Model (CNM). The philosophy of CNM is to provide application portability across diverse infrastructures.
+- High level constructs in CNM
+    - Sandbox - A Sandbox contains the configuration of a container's network stack. This includes management of the container's interfaces, routing table, and DNS settings.
+    - Endpoint - An Endpoint joins a Sandbox to a Network. The Endpoint construct exists so the actual connection to the network can be abstracted away from the application.
+    - Network - The CNM does not specify a Network in terms of the OSI model. An implementation of a Network could be a Linux bridge, a VLAN, etc. A Network is a collection of endpoints that have connectivity between them.
+- two pluggable and open interfaces that can be used by users
+    - Networking Drivers - pluggable and easily interchanged
+        - Native - provided by the Docker engine - Host, Bridge, Overlay, MACVLAN,None
+        - Remote Network Drivers are network drivers created by the community and other vendors. These drivers can be used to provide integration with incumbent software and hardware.
+    - IPAM Drivers - Docker has a native IP Address Management Driver that provides default subnets or IP addresses for networks and endpoints if they are not specified.
+
+- Scope - The network scope is the domain of the driver which can be the local or swarm scope. Local scope drivers provide connectivity and network services
+- Linux Network Concepts
+    - Bridge - Layer 2 construct that builds a virtual switch on top of an interface
+    - Namespace - network namespace is an isolated network stack in the kernel with its own interfaces, routes, firewall rules. it is a security aspect of containers on Linux - Typically, CNM network drivers implement separate namespaces for each container. However, containers can share the same network namespace or even be a part of the host's network namespaces
+    - Virtual ethernet device - veth - full duplex virtual connection between two network namespaces.
+    - iptables - native packet filtering system that has been a part of the Linux kernel since version 2.4. It's a feature rich L3/L4 firewall that provides rule chains for packet marking, masquerading, and dropping. The native Docker network drivers utilize iptables extensively to segment network traffic, provide host port mapping, and to mark traffic for load balancing decisions.
+
+the bible - https://success.docker.com/article/networking
+
+
+Configure Docker to use external DNS
+
+- Change the default DNS for docker 
+    - # sudo dockerd —dns 8.8.8.8
+- To set the search domain
+    - # sudo dockerd —dns-search mydomain.com 
+
+Use Docker to load balance HTTP/HTTPs traffic to an application (Configure L7 load balancing with Docker EE)  
+- You can configure the load balancer to balance requests between every node in the swarm even if there are no tasks scheduled on the node. 
+    - route traffic to the desired port on the built in Swarm load balancer
+    - Do not need to reconfigure if the swarm moves tasks off of the node.
+- To use an external load balancer without the routing mesh, set --endpoint-mode to dnsrr instead of the default value of vip
+- Load balancer with UCP
+    - Load-balance TCP traffic on port 443,
+    - Not terminate HTTPS connections,
+    - Use the /_ping endpoint on each manager node, to check if the node is healthy and if it should remain on the load balancing pool or not.
+
+- By default, both UCP and DTR use port 443. If you plan on deploying UCP and DTR, your load balancer needs to distinguish traffic between the two by IP address or port numbers
+
+Understand and describe the types of traffic that flow between the Docker engine, registry, and UCP controllers 
+
+- The traffic between DTR and UCP is always encrypted to ensure security. Traffic between containers is not encrypted by default. DTR / UCP management traffic used Mutual TLS
+- Networking can be an important part of a Docker EE deployment. The basic rule of thumb is not to have firewalls between the manager and worker nodes. When deploying to a cloud infrastructure, low latency is a must between nodes. Low latency ensures the databases are able to keep quorum.
+- Docker EE has a single sign on for the entire cluster
+- UCP
+    - UCP's management plane uses a private CA and certificates for all internal communication. The client certificates are automatically rotated on a schedule. Key rotation is a strong method for reducing the effect of a compromised node.
+    - Universal Control Plane makes it easy to create a client certificate bundle for use with the Docker client. The client bundle allows end users to create objects and deploy services from a local Docker client.
+    - RBAC
+        - Use of RBAC on the cluster controlled by UCP is highly recommended
+        -  Docker EE uses ACL’s called grants to control access between users and cluster resources. Grants are made up of a subject(who) and a role(permission) and a collection(resources).
+- DTR
+    - Just as with UCP, DTR can use fully-signed company certificates or self-signed certs. The Certificate Authority (CA) for the organization can be used. To reduce the number of certificates, add multiple Subject Alternative Names (SANs) to a single certificate.
+    - dtr-ol is used to communicate between DTR nodes
+- Swarm Overlay network traffic
+    - The overlay network will be used to connect tasks together to form the docker swarm service across all of the nodes
+    - Traffic may be encrypted
+    -  # docker network create --opt encrypted --driver overlay --attachable my-attachable-multi-host-network
+- Docker swarm Ports
+    - https://www.bretfisher.com/docker-swarm-firewall-ports/ 
+- To publish a service’s ports externally to the swarm, use the --publish <PUBLISHED-PORT>:<SERVICE-PORT> flag
+    - ex 3 task nginx service on 10 node swarm - # docker service create --name my_web --replicas 3 --publish published=8080,target=80 nginx
+
+- Overlay Network
+    - First, create overlay network on a manager node
+        - # docker network create —drive overlay my-new-network 
+    - Second deploy the service on the new overlay
+        - # docker service create --replicas 3 --network my-network --name my-web nginx
+    - If you have an existing service
+        - # docker service update --network-add my-network my-web
+
+
+Describe the difference between "host" and "ingress" port publishing mode 
+
+- Using the routing mesh may not be the right choice for your application if you need to make routing decisions based on application state or you need total control of the process for routing requests to your service’s tasks.
+    - If you publish a service’s ports directly on the swarm node using mode=host and also set published=<PORT> this creates an implicit limitation that you can only run one task for that service on a given swarm node.
+    - # docker service create --mode global --publish mode=host,target=80,published=8080 --name=nginx nginx:latest
